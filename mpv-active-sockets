@@ -5,7 +5,7 @@ declare -a FILTERS
 declare -a SOCKETS
 declare -a ACTIVE_SOCKETS
 SOCKET_DIR="${MPV_SOCKET_DIR:-/tmp/mpvSockets}"
-GREP_OPTS=("-E" "--invert-match")
+GREP_OPTS=("-E")
 REGEX='^$'
 PRINT=1
 
@@ -18,17 +18,17 @@ usage() {
 usage: $0 [options]
 
 options:
-    -a, --ampv                 Add "ampv" to filters.
+    -a, --ampv                 Only print sockets ending in "ampv".
     -h, --help                 Show this help message and exit.
     -f, --filter PATTERN       Add PATTERN to filters.
-    -i, --invert               Only check filtered sockets.
-    -m, --music                Add "music" to filters.
+    -i, --invert               Only print sockets not matching filters.
+    -m, --music                Only print sockets ending in "music".
     -p, --print                Print active socket file paths.
     -P, --pid PID              Return socket path of PID if it exists.
     -q, --quiet                Do not print anything, only return 0 or 1.
     -s, --socket PATH          Check if the given PATH is an active mpv socket.
-    -u, --umpv                 Add "umpv" to filters.
-    -U, --unique               Only check unique mpv sockets (i.e., anonymous sockets).
+    -u, --umpv                 Only print sockets ending in "umpv".
+    -U, --unique               Only print unique mpv sockets (i.e., anonymous sockets).
 EOF
 }
 
@@ -48,7 +48,7 @@ get_opts() {
                 FILTERS+=("${2:?--filter needs a filter}")
                 SHIFT_COUNT=2
                 ;;
-            -i | --invert) GREP_OPTS=("-E") ;;
+            -i | --invert) GREP_OPTS+=("--invert-match") ;;
             -m | --music) FILTERS+=("music") ;;
             -p | --print) PRINT=1 ;;
             -P | --pid)
