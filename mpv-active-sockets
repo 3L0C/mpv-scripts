@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Lists active mpv sockets
+
+declare -a FILTERS
+declare -a SOCKETS
+declare -a ACTIVE_SOCKETS
+SOCKET_DIR="${MPV_SOCKET_DIR:-/tmp/mpvSockets}"
+GREP_OPTS=("-E" "--invert-match")
+REGEX='^$'
+PRINT=1
+
+sanity_check() {
+    [[ -d "$SOCKET_DIR" ]] && pidof mpv >/dev/null 2>&1
+}
+
+usage() {
+    cat <<-EOF
+usage: $0 [options]
+
+options:
+    -a, --ampv                 Add "ampv" to filters.
+    -h, --help                 Show this help message and exit.
+    -f, --filter PATTERN       Add PATTERN to filters.
+    -i, --invert               Only check filtered sockets.
+    -m, --music                Add "music" to filters.
+    -p, --print                Print active socket file paths.
+    -P, --pid PID              Return socket path of PID if it exists.
+    -q, --quiet                Do not print anything, only return 0 or 1.
+    -s, --socket PATH          Check if the given PATH is an active mpv socket.
+    -u, --umpv                 Add "umpv" to filters.
+    -U, --unique               Only check unique mpv sockets (i.e., anonymous sockets).
+EOF
+}
+
+abort() {
+    usage
+    [[ -n "$1" ]] && echo "$0: $1" >&2
+    exit 1
+}
+
+get_opts() {
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -a | --ampv) FILTERS+=("ampv") ;;
+            -h | --help) abort ;;
+            -f | --filter)
+                FILTERS+=("${2:?--filter needs a filter}")
+                SHIFT_COUNT=2
+                ;;
+            -i | --invert) GREP_OPTS=("-E") ;;
+            -m | --music) FILTERS+=("music") ;;
+            -p | --print) PRINT=1 ;;
+            -P | --pid)
+                PID="${2:?--pid needs a PID}"
+                SHIFT_COUNT=2
+                ;;
+            -q | --quiet) PRINT=0 ;;
+            -s | --socket)
+                SOCKET="${2:?--socket needs a socket}"
+                SHIFT_COUNT=2
+                ;;
+            -u | --umpv) FILTERS+=("umpv") ;;
+            -U | --unique) FILTERS+=("[0-9]*_*") ;;
+            *) abort "$1: unrecognized option." ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+print_pid_socket() {
+    readarray -t SOCKETS < <(find "$SOCKET_DIR" -maxdepth 1 -type s ; printf '\0')
+
+    for s in "${SOCKETS[@]}"; do
+        [[ "$PID" != "$(mpv-get-property "$s" "pid")" ]] && continue
+        printf '%s\n' "$s"
+        break
+    done
+}
+
+mpv_communicate() {
+    socat - "$2" <<<"${1:?missing argument to mpv_communicate}"
+}
+
+mpv_exec_command() {
+    mpv_communicate "{ \"command\": [${1:?missing argument to mpv_exec_command}] }" "$2"
+}
+
+is_active_socket() {
+    if [[ ! -S "$1" ]] ||
+           ! mpv_exec_command '"get_property", "path"' "$1" >/dev/null 2>&1; then
+        [[ -e "$1" ]] && rm -f "$1" >&2
+        return 1
+    fi
+}
+
+find_sockets() {
+    find "$SOCKET_DIR" -maxdepth 1 -type s | grep "${GREP_OPTS[@]}" "$REGEX" -
+}
+
+find_active_sockets() {
+    for s in "$@"; do
+        is_active_socket "$s" || continue
+        printf '%s\n' "$s"
+    done
+}
+
+print_active_sockets() {
+    [[ "${#FILTERS[@]}" -ne 0 ]] && REGEX="$(IFS='|' ; printf '(%s)$' "${FILTERS[*]//[()|]/\\&}")"
+    # echo "$REGEX"
+    readarray -t SOCKETS < <(find_sockets)
+    readarray -t ACTIVE_SOCKETS < <(find_active_sockets "${SOCKETS[@]}")
+    if [[ "$PRINT" -eq 1 ]] && [[ "${#ACTIVE_SOCKETS[@]}" -ne 0 ]]; then
+        printf '%s\n' "${ACTIVE_SOCKETS[@]}" | sort
+    fi
+}
+
+handle_opts() {
+    if [[ -n "$SOCKET" ]]; then
+        is_active_socket "$SOCKET"
+        return $?
+    elif [[ -n "$PID" ]]; then
+        print_pid_socket
+    else
+        print_active_sockets
+    fi
+}
+
+main() {
+    sanity_check || return 1
+    get_opts "$@"
+    handle_opts
+}
+
+main "$@"
