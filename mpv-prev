@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Wrapper for mpv-playlist-ctrl to go to the next song
+
+mpv-playlist-ctrl prev "$@"

@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# interactively pick one of the active mpv instances,
+# and send it a 'quit' command
+
+declare -a FILTER_OPTS
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} [options]
+
+options:
+    -a, --ampv           Quit the ampv socket.
+    -f, --fzf            Use fzf for selection instead of dmenu.
+    -h, --help           Show this help message and exit.
+    -l, --latest         Quit the most recently playing mpv instance.
+    -m, --music          Quit the music socket.
+    -q, --quiet          Suppress error messages.
+    -s, --socket SOCKET  Quit the specified socket.
+    -u, --umpv           Quit the umpv socket.
+
+If no option is provided, interactively select an mpv instance to quit.
+EOF
+    exit 0
+}
+
+abort() {
+    echo "$1" >&2
+    exit 1
+}
+
+get_opts() {
+    # If no arguments provided, we'll pick interactively
+    [[ $# -eq 0 ]] && return 0
+
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -a | --ampv)
+                FILTER_OPTS+=("--ampv")
+                ;;
+            -f | --fzf)
+                FZF="--fzf"
+                ;;
+            -h | --help)
+                usage
+                ;;
+            -l | --latest)
+                GET_LATEST=1
+                ;;
+            -m | --music)
+                FILTER_OPTS+=("--music")
+                ;;
+            -q | --quiet)
+                QUIET="--quiet"
+                ;;
+            -s | --socket)
+                USE_SOCKET="${2:?--socket requires a socket argument}"
+                SHIFT_COUNT=2
+                ;;
+            -u | --umpv)
+                FILTER_OPTS+=("--umpv")
+                ;;
+            *)
+                abort "Unknown option: $1"
+                ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+set_socket() {
+    if [[ "$GET_LATEST" -eq 1 ]]; then
+        # Get the most recently playing instance
+        local playing
+        readarray -t playing < <(mpv-currently-playing --unique --socket)
+        [[ "${#playing[@]}" -eq 0 ]] && {
+            [[ -z "$QUIET" ]] && notify-send "mpv-quit" "No active instances of mpv..."
+            return 1
+        }
+        USE_SOCKET="${playing[-1]}"
+    elif [[ "${#FILTER_OPTS[@]}" -gt 0 ]]; then
+        # Get a single socket using filter options
+        local sockets
+        readarray -t sockets < <(mpv-active-sockets "${FILTER_OPTS[@]}")
+        [[ "${#sockets[@]}" -eq 0 ]] && {
+            [[ -z "$QUIET" ]] && notify-send "mpv-quit" "No matching mpv instances found..."
+            return 1
+        }
+        USE_SOCKET="${sockets[0]}"
+    else
+        # Pick interactively
+        USE_SOCKET="$(mpv-pick $FZF $QUIET)"
+        [[ -z "$USE_SOCKET" ]] && return 1
+    fi
+
+    return 0
+}
+
+mpv_quit() {
+    local socket="$1"
+    mpv-communicate $QUIET "$socket" 'quit'
+    mpv-track "$socket"
+}
+
+main() {
+    get_opts "$@"
+
+    # If socket is not already set by options, determine it
+    if [[ -z "$USE_SOCKET" ]]; then
+        set_socket || exit 1
+    fi
+
+    mpv_quit "$USE_SOCKET"
+}
+
+main "$@"

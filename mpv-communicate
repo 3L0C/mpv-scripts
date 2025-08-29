@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Sends commands to an mpv socket using socat
+# First argument: mpv socket
+# all other arguments are sent to the socket using socat
+
+declare -a ARGS
+GET_SOCKET=
+PRINT=1
+SOCKET=
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} [options] [SOCKET] COMMAND
+
+    Read about mpv IPC commands at mpv.io/manual/master/#json-ipc.
+
+options:
+    -q, --quiet           Print nothing, only return if COMMAND was successful.
+EOF
+}
+
+abort() {
+    if [[ "$PRINT" -eq 1 ]]; then
+        usage
+        echo "${0##*/}: $1" >&2
+    fi
+
+    exit 1
+}
+
+get_opts() {
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -q | --quiet) PRINT=0 ;;
+            -a | --ampv) GET_SOCKET="AMPV" ;;
+            -m | --music) GET_SOCKET="MUSIC" ;;
+            -u | --umpv) GET_SOCKET="UMPV" ;;
+            *)
+                if [[ -z "$GET_SOCKET" ]]; then
+                    SOCKET="$1"
+                else
+                    ARGS+=("$1")
+                fi
+                ARGS+=("${@:2}")
+                SHIFT_COUNT="$#"
+                ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+set_socket() {
+    [[ -n "$SOCKET" ]] && return
+    case "$GET_SOCKET" in
+        AMPV) SOCKET="$(mpv-active-sockets --ampv | head -n1)" ;;
+        MUSIC) SOCKET="$(mpv-active-sockets --music | head -n1)" ;;
+        UMPV) SOCKET="$(mpv-active-sockets --umpv | head -n1)" ;;
+        *) abort "unrecognized value in GET_SOCKET: $GET_SOCKET" ;;
+    esac
+}
+
+validate_socket() {
+    [[ ! -e "$SOCKET" ]] && abort "path doesn't exist: $SOCKET"
+    [[ ! -S "$SOCKET" ]] && abort "path isn't a socket: $SOCKET"
+}
+
+mpv_communicate() {
+    if [[ "$PRINT" -eq 1 ]]; then
+        socat - "${SOCKET:?Socket is not set.}" <<<"${ARGS[@]}"
+    else
+        socat - "${SOCKET:?Socket is not set.}" <<<"${ARGS[@]}" >/dev/null 2>&1
+    fi
+}
+
+main() {
+    get_opts "$@"
+    set_socket
+    validate_socket
+    mpv_communicate
+}
+
+main "$@"

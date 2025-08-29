@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# Toggle play/pause state of mpv instances
+# Keeps track of which sockets were recently paused/resumed
+
+readonly LAST_PLAYING="/tmp/mpvSockets/mpv-last-used"
+readonly TOGGLE_DIR="/tmp/mpc-toggle"
+readonly TOGGLE_FILE="$TOGGLE_DIR/last-toggled.txt"
+
+declare -a MANUAL_SOCKETS
+declare -a CURRENTLY_PLAYING
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} [options]
+
+Toggle play/pause state of mpv instances. Without options,
+toggles the state of the currently playing instance or
+resumes the most recently paused instance.
+
+options:
+    -a, --ampv           Toggle the ampv socket.
+    -f, --fzf            Use fzf for selection instead of dmenu.
+    -h, --help           Show this help message and exit.
+    -l, --last           Toggle the last used socket.
+    -m, --music          Toggle the music socket.
+    -p, --pick           Interactively pick a socket to toggle.
+    -q, --quiet          Suppress messages and notifications.
+    -s, --socket SOCKET  Toggle the specified socket.
+    -u, --umpv           Toggle the umpv socket.
+EOF
+    exit 0
+}
+
+abort() {
+    [[ "$QUIET" -ne 1 ]] && echo "$1" >&2
+    exit 1
+}
+
+create_toggle_dir() {
+    [[ -d "$TOGGLE_DIR" ]] && return 0
+    mkdir --mode='700' "$TOGGLE_DIR" 2>/dev/null || {
+        abort "Failed to create toggle directory: $TOGGLE_DIR"
+    }
+}
+
+update_last_toggled() {
+    create_toggle_dir
+    echo "mpv" >"$TOGGLE_FILE"
+}
+
+get_opts() {
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -a | --ampv) FILTER_OPTS+=("--ampv") ;;
+            -f | --fzf) FZF="--fzf" ;;
+            -h | --help) usage ;;
+            -l | --last) USE_LAST=1 ;;
+            -m | --music) FILTER_OPTS+=("--music") ;;
+            -p | --pick) USE_PICK=1 ;;
+            -q | --quiet)
+                QUIET=1
+                QUIET_FLAG="--quiet"
+                ;;
+            -s | --socket)
+                MANUAL_SOCKETS+=("${2:?--socket needs a socket argument}")
+                SHIFT_COUNT=2
+                ;;
+            -u | --umpv) FILTER_OPTS+=("--umpv") ;;
+            *) abort "Unknown option: $1" ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+get_currently_playing() {
+    readarray -t CURRENTLY_PLAYING < <(mpv-currently-playing --socket)
+    [[ "${#CURRENTLY_PLAYING[@]}" -gt 0 ]] && MOST_RECENT="${CURRENTLY_PLAYING[-1]}"
+}
+
+get_socket_from_options() {
+    # First check if we should use the last socket
+    if [[ "$USE_LAST" -eq 1 ]]; then
+        [[ -e "$LAST_PLAYING" ]] || abort "Last used socket not found"
+        local last_socket="$(readlink "$LAST_PLAYING")"
+        [[ -e "$last_socket" ]] || abort "Last socket no longer exists: $last_socket"
+        MANUAL_SOCKETS+=("$last_socket")
+        return 0
+    fi
+
+    # Check if we should use filtered sockets
+    if [[ "${#FILTER_OPTS[@]}" -gt 0 ]]; then
+        local sockets
+        readarray -t sockets < <(mpv-active-sockets "${FILTER_OPTS[@]}")
+        [[ "${#sockets[@]}" -eq 0 ]] && abort "No matching mpv instances found"
+        MANUAL_SOCKETS+=("${sockets[0]}")
+        return 0
+    fi
+
+    # Check if we should pick interactively
+    if [[ "$USE_PICK" -eq 1 ]]; then
+        local pick_opts=()
+        [[ -n "$FZF" ]] && pick_opts+=("$FZF")
+        [[ -n "$QUIET_FLAG" ]] && pick_opts+=("$QUIET_FLAG")
+
+        local chosen="$(mpv-pick "${pick_opts[@]}")"
+        [[ -z "$chosen" ]] && abort "No socket selected"
+        MANUAL_SOCKETS+=("$chosen")
+        return 0
+    fi
+
+    # If no sockets specified yet, we'll use smart toggle
+    return 0
+}
+
+toggle() {
+    local socket="$1"
+
+    # Remove existing symlink and create a new one
+    rm -f "$LAST_PLAYING"
+    ln -s "$socket" "$LAST_PLAYING"
+
+    # Send toggle command to socket
+    if [[ "$QUIET" -eq 1 ]]; then
+        mpv-communicate --quiet "$socket" 'cycle pause'
+    else
+        echo "Toggling $socket"
+        mpv-communicate "$socket" 'cycle pause'
+    fi
+
+    return $?
+}
+
+manual_toggle_loop() {
+    local result=0
+
+    for socket in "${MANUAL_SOCKETS[@]}"; do
+        toggle "$socket" || result=1
+    done
+
+    return $result
+}
+
+smart_toggle() {
+    local lp_location="$(readlink "$LAST_PLAYING" 2>/dev/null)"
+
+    if mpv-currently-playing --quiet; then
+        # There's at least one currently playing instance
+        get_currently_playing
+        [[ "$QUIET" -ne 1 ]] && echo "Pausing ${MOST_RECENT}..."
+        toggle "${MOST_RECENT}" || return 1
+    elif [[ -n "$lp_location" ]] && [[ -e "$lp_location" ]]; then
+        # Try to resume the last paused socket
+        [[ "$QUIET" -ne 1 ]] && echo "Found recently paused socket, resuming..."
+        toggle "$lp_location"
+    else
+        # Let the user pick a socket
+        [[ "$QUIET" -ne 1 ]] && echo "No recently used socket, selecting interactively..."
+        local pick_opts=()
+        [[ -n "$FZF" ]] && pick_opts+=("$FZF")
+
+        local chosen="$(mpv-pick "${pick_opts[@]}")"
+        [[ -z "$chosen" ]] && abort "No socket selected"
+        toggle "$chosen"
+    fi
+}
+
+main() {
+    get_opts "$@" || return 1
+    update_last_toggled
+    get_socket_from_options || return 1
+
+    if [[ "${#MANUAL_SOCKETS[@]}" -eq 0 ]]; then
+        smart_toggle
+        return $?
+    else
+        manual_toggle_loop
+        return $?
+    fi
+}
+
+main "$@"

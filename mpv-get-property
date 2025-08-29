@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+SOCKET=
+PROPERTY=
+RESPONSE=
+DATA=
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} SOCKET PROPERTY
+EOF
+}
+
+abort() {
+    usage >&2
+    [[ -n "$1" ]] && printf '\n%s\n' "${0##*/}: $1" >&2
+    exit 1
+}
+
+get_opts() {
+    [[ -z "$1" ]] && abort "missing SOCKET."
+    [[ -z "$2" ]] && abort "missing PROPERTY."
+
+    SOCKET="$1"
+    PROPERTY="$2"
+}
+
+validate_socket() {
+    [[ ! -e "$SOCKET" ]] && abort "path doesn't exist: $SOCKET"
+    [[ ! -S "$SOCKET" ]] && abort "path isn't a socket: $SOCKET"
+}
+
+get_property() {
+    RESPONSE="$(printf '{ "command": ["get_property", "%s"] }\n' "$PROPERTY" | socat - "$SOCKET")"
+}
+
+process_data() {
+    DATA="$(jq -r 'select(.error == "success") | .data' <<<"$RESPONSE")"
+    if [[ -n "$DATA" ]]; then
+        echo "$DATA"
+    else
+        echo -e "Error: $(jq -r '.error' <<<"$RESPONSE")\nResponse:\n$(jq <<<"$RESPONSE")" >&2
+        return 1
+    fi
+}
+
+main() {
+    get_opts "$@"
+    validate_socket
+    get_property
+    process_data
+}
+
+main "$@"

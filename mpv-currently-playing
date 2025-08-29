@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# mpv-get-property wrapper to get the full path of currently playing mpv
+# instance.
+#
+# If there are multiple instances of mpv playing at the same time,
+# prints both.
+#
+# Can provide the --socket flag to instead print the socket of the
+# current mpv instance.
+#
+# Pass the --all flag to print the path for all items, regardless
+# of whether or not they're playing currently.
+
+declare -a SOCKETS
+declare -a ACTIVE_OPTS
+PRINT_OPT="PATH"
+PRINT_ALL=0
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} [options]
+
+options:
+    -a, --ampv            Print the file played by sockets ending in "ampv".
+    -A, --all             Print the file played by all mpv sockets including
+                          paused instances.
+    -c, --check SOCKET    Print the file played by SOCKET if it is active.
+                          Returns 1 if SOCKET is not active.
+    -m, --music           Print the file played by sockets ending in "music".
+    -M, --media-title     Print the media-title instead of the file path.
+    -n, --no-music        Print the file played by sockets not ending in "music".
+    -q, --quiet           Print nothing, only return successful if mpv is currently
+                          playing.
+    -s, --socket          Print socket paths instead of file paths.
+    -u, --umpv            Print the file played by sockets ending in "umpv".
+    -U, --unique          Print the file played by unique mpv sockets
+                          (i.e., anonymous sockets).
+EOF
+}
+
+abort() {
+    usage >&2
+    [[ -n "$1" ]] && echo "${0##*/}: $1" >&2
+    exit 1
+}
+
+get_opts() {
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -a | --ampv) ACTIVE_OPTS+=("--ampv") ;;
+            -A | --all) PRINT_ALL=1 ;;
+            -c | --check)
+                ACTIVE_OPTS+=("--socket"
+                              "${2:?--check needs a socket to check.}"
+                              "--print")
+                SHIFT_COUNT=2
+                ;;
+            -m | --music) ACTIVE_OPTS+=("--music") ;;
+            -M | --media-title) PRINT_OPT="MEDIA_TITLE" ;;
+            -n | --no-music) ACTIVE_OPTS+=("--music" "--invert") ;;
+            -q | --quiet) PRINT_OPT="NONE" ;;
+            -s | --socket) PRINT_OPT="SOCKETS" ;;
+            -u | --umpv) ACTIVE_OPTS+=("--umpv") ;;
+            -U | --unique) ACTIVE_OPTS+=("--unique") ;;
+            *) abort "$1: unknown option passed." ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+is_paused() {
+    [[ "$(mpv-get-property "$1" 'playlist')" == '[]' ]] || \
+    [[ "$(mpv-get-property "$1" 'pause')" == 'true' ]]
+}
+
+are_any_playing() {
+    for s in "${SOCKETS[@]}"; do
+        ! is_paused "$s" && return 0
+    done
+    return 1
+}
+
+print_socket_path() {
+    SOCKET_PATH="$(mpv-get-property "$1" 'path')"
+
+    if ! [[ "$SOCKET_PATH" =~ ^/ || "$SOCKET_PATH" =~ .*://.*  ]]; then
+        SOCKET_PATH="$(mpv-get-property "$s" 'working-directory')/$SOCKET_PATH"
+    fi
+
+    echo "$SOCKET_PATH"
+}
+
+print_sockets() {
+    RESULT=1
+
+    for s in "${SOCKETS[@]}"; do
+        # Skip paused sockets unless --all was passed.
+        is_paused "$s" && [[ "$PRINT_ALL" -eq 0 ]] && continue
+        [[ "$RESULT" -eq 1 ]] && RESULT=0
+
+        case "$PRINT_OPT" in
+            SOCKETS) echo "$s" ;;
+            MEDIA_TITLE) mpv-get-property "$s" 'media-title' ;;
+            PATH) print_socket_path "$s" ;;
+        esac
+    done
+
+    return "$RESULT"
+}
+
+handle_opts() {
+    readarray -t SOCKETS < <(mpv-active-sockets "${ACTIVE_OPTS[@]}")
+
+    if [[ "${#SOCKETS[@]}" -eq 0 ]]; then
+        return 1
+    elif [[ "$PRINT_OPT" == "NONE" ]]; then
+        are_any_playing
+    else
+        print_sockets
+    fi
+}
+
+main() {
+    get_opts "$@"
+    handle_opts
+}
+
+main "$@"

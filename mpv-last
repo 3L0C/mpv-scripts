@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+# wk-prompt setup
+
+# shellcheck disable=SC1091
+source wk-prompt
+# shellcheck disable=SC2034
+wk_keywords=("+write")
+# shellcheck disable=SC2034
+wk_preprocessor_cmds=(
+    ":delay 0"
+    ":menu-width 0"
+)
+
+build_wks_description() {
+    echo "${1##*/}"
+}
+
+# Last played playlist
+savefile="${XDG_CONFIG_HOME:-$HOME/.config}/mpv/playlists/last.m3u"
+declare -a lastplayed
+selection=
+
+set_last_played() {
+    readarray -t lastplayed < <(tac "$savefile")
+}
+
+assert_last_played() {
+    [[ "${#lastplayed[@]}" -gt 0 ]] && return 0
+
+    notify-send "${0##*/}" "Nothing in '${savefile##*/}' playlist!"
+    exit 1
+}
+
+get_selection() {
+    selection="$(wk_prompt "${lastplayed[@]}")"
+}
+
+play_selection() {
+    if [[ -n "$selection" ]]; then
+        perl -i -ne "print unless \$_ eq \"$selection\n\"" "$savefile"
+        mpv --script-opts=mpv-save-enabled=yes "$selection"
+    else
+        echo "No selection!"
+    fi
+}
+
+main() {
+    set_last_played
+    assert_last_played
+    get_selection
+    play_selection
+}
+
+main "$@"

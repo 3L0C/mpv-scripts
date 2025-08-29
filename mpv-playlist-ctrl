@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Control the mpv playlist for the currently playing mpv instance
+# Operations: next, prev, shuffle, etc.
+
+abort() {
+    echo "No active instances of mpv..." >&2
+    exit 1
+}
+
+usage() {
+    cat <<-EOF
+usage: ${0##*/} [operation] [options]
+
+operations:
+    next               Go to the next item in the playlist (default).
+    prev               Go to the previous item in the playlist.
+    shuffle            Shuffle the playlist.
+
+options:
+    -a, --ampv         Use the ampv socket.
+    -A, --any          Use any active socket.
+    -f, --fzf          Use fzf for selection instead of dmenu.
+    -h, --help         Show this help message and exit.
+    -m, --music        Use the music socket.
+    -p, --pick         Interactively pick a socket.
+    -s, --socket SOCKET Use the specified socket.
+    -u, --umpv         Use the umpv socket.
+EOF
+    exit 1
+}
+
+get_opts() {
+    # Check if the first argument is an operation
+    if [[ "$#" -gt 0 && "$1" != -* ]]; then
+        OPERATION="$1"
+        shift
+    fi
+
+    while [[ "$#" -ne 0 ]]; do
+        SHIFT_COUNT=1
+        case "$1" in
+            -a | --ampv) TYPE="--ampv" ;;
+            -A | --any) TYPE="--all" ;;
+            -f | --fzf) FZF="--fzf" ;;
+            -h | --help) usage ;;
+            -m | --music) TYPE="--music" ;;
+            -p | --pick) PICK=1 ;;
+            -s | --socket)
+                SOCKET="${2:?--socket requires a socket argument}"
+                SHIFT_COUNT=2
+                ;;
+            -u | --umpv) TYPE="--umpv" ;;
+            *) echo "Unrecognized option '$1'." >&2 ; exit 1 ;;
+        esac
+        shift "$SHIFT_COUNT"
+    done
+}
+
+set_socket() {
+    if [[ "$PICK" -eq 1 ]]; then
+        # shellcheck disable=SC2086
+        SOCKET="$(mpv-pick $FZF --quiet)"
+    else
+        # shellcheck disable=SC2086
+        SOCKET="$(mpv-currently-playing $TYPE --socket)"
+    fi
+}
+
+validate_operation() {
+    case "$OPERATION" in
+        next|prev|shuffle) return 0 ;;
+        *) echo "Error: Unknown operation '$OPERATION'" >&2 ; usage ;;
+    esac
+}
+
+mpv_playlist_control() {
+    local socket="$1"
+    [[ -z "$socket" ]] && abort
+
+    local command
+    case "$OPERATION" in
+        next) command='{ "command": ["playlist-next"] }' ;;
+        prev) command='{ "command": ["playlist-prev"] }' ;;
+        shuffle) command='{ "command": ["script-binding", "playlistmanager/shuffleplaylist"] }' ;;
+    esac
+
+    mpv-communicate "$socket" "$command" >/dev/null 2>&1
+    mpv-track "$socket"
+}
+
+main() {
+    get_opts "$@"
+    validate_operation
+    [[ -z "$SOCKET" ]] && set_socket
+    mpv_playlist_control "$SOCKET"
+}
+
+main "$@"
