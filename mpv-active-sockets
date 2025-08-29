@@ -6,7 +6,7 @@ declare -a SOCKETS
 declare -a ACTIVE_SOCKETS
 SOCKET_DIR="${MPV_SOCKET_DIR:-/tmp/mpvSockets}"
 GREP_OPTS=("-E")
-REGEX='^$'
+REGEX=''
 PRINT=1
 
 sanity_check() {
@@ -15,7 +15,7 @@ sanity_check() {
 
 usage() {
     cat <<-EOF
-usage: $0 [options]
+usage: ${0##*/} [options]
 
 options:
     -a, --ampv                 Only print sockets ending in "ampv".
@@ -34,7 +34,7 @@ EOF
 
 abort() {
     usage
-    [[ -n "$1" ]] && echo "$0: $1" >&2
+    [[ -n "$1" ]] && echo "${0##*/}: $1" >&2
     exit 1
 }
 
@@ -69,7 +69,7 @@ get_opts() {
 }
 
 print_pid_socket() {
-    readarray -t SOCKETS < <(find "$SOCKET_DIR" -maxdepth 1 -type s ; printf '\0')
+    readarray -t SOCKETS < <(find "$SOCKET_DIR" -maxdepth 1 -type s)
 
     for s in "${SOCKETS[@]}"; do
         [[ "$PID" != "$(mpv-get-property "$s" "pid")" ]] && continue
@@ -107,7 +107,6 @@ find_active_sockets() {
 
 print_active_sockets() {
     [[ "${#FILTERS[@]}" -ne 0 ]] && REGEX="$(IFS='|' ; printf '(%s)$' "${FILTERS[*]//[()|]/\\&}")"
-    # echo "$REGEX"
     readarray -t SOCKETS < <(find_sockets)
     readarray -t ACTIVE_SOCKETS < <(find_active_sockets "${SOCKETS[@]}")
     if [[ "$PRINT" -eq 1 ]] && [[ "${#ACTIVE_SOCKETS[@]}" -ne 0 ]]; then
@@ -117,8 +116,12 @@ print_active_sockets() {
 
 handle_opts() {
     if [[ -n "$SOCKET" ]]; then
-        is_active_socket "$SOCKET"
-        return $?
+        if is_active_socket "$SOCKET"; then
+            printf '%s\n' "$SOCKET"
+            return 0
+        else
+            return 1
+        fi
     elif [[ -n "$PID" ]]; then
         print_pid_socket
     else
