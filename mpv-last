@@ -13,7 +13,7 @@ wk_preprocessor_cmds=(
 )
 
 build_wks_description() {
-    echo "${1##*/}"
+    _wks_desc="${1##*/}"
 }
 
 # Last played playlist
