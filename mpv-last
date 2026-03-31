@@ -38,7 +38,7 @@ get_selection() {
 
 play_selection() {
     if [[ -n "$selection" ]]; then
-        perl -i -ne "print unless \$_ eq \"$selection\n\"" "$savefile"
+        perl -i -ne 'BEGIN { $s = shift } print unless $_ eq "$s\n"' "$selection" "$savefile"
         mpv --script-opts=mpv-save-enabled=yes "$selection"
     else
         echo "No selection!"
