@@ -12,19 +12,19 @@ usage() {
 usage: ${0##*/} [operation] [options]
 
 operations:
-    next               Go to the next item in the playlist (default).
-    prev               Go to the previous item in the playlist.
-    shuffle            Shuffle the playlist.
+    next                  Go to the next item in the playlist (default).
+    prev                  Go to the previous item in the playlist.
+    shuffle               Shuffle the playlist.
 
 options:
-    -a, --ampv         Use the ampv socket.
-    -A, --any          Use any active socket.
-    -f, --fzf          Use fzf for selection instead of dmenu.
-    -h, --help         Show this help message and exit.
-    -m, --music        Use the music socket.
-    -p, --pick         Interactively pick a socket.
-    -s, --socket SOCKET Use the specified socket.
-    -u, --umpv         Use the umpv socket.
+    -a, --ampv            Use the ampv socket.
+    -A, --any             Use any active socket.
+    -f, --fzf             Use fzf for selection instead of dmenu.
+    -h, --help            Show this help message and exit.
+    -m, --music           Use the music socket.
+    -p, --pick            Interactively pick a socket.
+    -s, --socket SOCKET   Use the specified socket.
+    -u, --umpv            Use the umpv socket.
 EOF
     exit 1
 }
